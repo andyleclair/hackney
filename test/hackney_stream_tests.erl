@@ -30,7 +30,7 @@ async_request() ->
     {ok, ClientRef} = hackney:get(URL, [], <<>>, Options),
     {StatusCode, Keys} = receive_response(ClientRef),
     timer:sleep(100),
-    {mstate, Dict, _} = sys:get_state(hackney_manager),
+    {mstate, Dict} = sys:get_state(hackney_manager),
     [?_assertEqual(0, dict:size(Dict)),
      ?_assertEqual(200, StatusCode),
      ?_assertEqual([body, headers, status], Keys)].

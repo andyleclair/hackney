@@ -107,8 +107,7 @@ wait_headers({header, {Key, Value}, Parser}, Client, Status, Headers) ->
 wait_headers({headers_complete, Parser}, Client, Status, Headers) ->
   ResponseTime = timer:now_diff(os:timestamp(),
     Client#client.start_time)/1000,
-  _ = metrics:update_histogram(Client#client.mod_metrics,
-                               [hackney, Client#client.host, response_time],
+  _ = metrics:update([hackney, Client#client.host, response_time],
                                ResponseTime),
   HeadersList = hackney_headers_new:to_list(Headers),
   TE = hackney_headers_new:get_value(<<"transfer-encoding">>, Headers, nil),

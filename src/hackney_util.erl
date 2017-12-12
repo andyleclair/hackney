@@ -11,7 +11,6 @@
 -export([maybe_apply_defaults/2]).
 -export([is_ipv6/1]).
 -export([privdir/0]).
--export([mod_metrics/0]).
 -export([to_atom/1]).
 
 -export([merge_opts/2]).
@@ -99,16 +98,6 @@ privdir() ->
       filename:join(AppPath, "priv");
     Dir -> Dir
   end.
-
-mod_metrics() ->
-  case application:get_env(hackney, mod_metrics) of
-    {ok, folsom} -> metrics_folsom;
-    {ok, exometer} -> metrics_exometer;
-    {ok, dummy} -> metrics_dummy;
-    {ok, Mod} -> Mod;
-    _ -> metrics_dummy
-  end.
-
 
 to_atom(V) when is_list(V) ->
   try

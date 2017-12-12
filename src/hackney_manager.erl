@@ -44,8 +44,7 @@
 
 -define(REFS, hackney_manager_refs).
 
--record(mstate, {pids=dict:new(),
-  metrics}).
+-record(mstate, {pids=dict:new()}).
 
 
 new_request(#client{request_ref=Ref}=Client) when is_reference(Ref) ->
@@ -281,14 +280,13 @@ init(_) ->
   _ = ets:new(?REFS, [named_table, set, protected]),
 
   %% initialize metrics
-  Metrics = init_metrics(),
+  init_metrics(),
 
   process_flag(trap_exit, true),
   %% return {ok, {Pids, Refs}}
   %% Pids are the managed pids
   %% Refs are the managed requests
-  {ok, #mstate{pids=dict:new(),
-    metrics=Metrics}}.
+  {ok, #mstate{pids=dict:new()}}.
 
 
 handle_call({new_request, Pid, Ref, Client}, _From, #mstate{pids=Pids}=State) ->
@@ -300,7 +298,7 @@ handle_call({new_request, Pid, Ref, Client}, _From, #mstate{pids=Pids}=State) ->
                           start_time=StartTime,
                           host=Client#client.host},
   %% start the request
-  _ = start_request(ReqInfo, State),
+  _ = start_request(ReqInfo),
   %% track the request owner
   Pids2 = track_owner(Pid, Ref, Pids),
   ets:insert(?REFS, {Ref, {Pid, nil, ReqInfo}}),
@@ -317,7 +315,7 @@ handle_call({take_control, Ref, Client}, _From, State) ->
       NInfo = Info#request_info{start_time=StartTime,
                                 host=Client#client.host},
       %% start the request
-      _ = start_request(NInfo, State),
+      _ = start_request(NInfo),
       ets:insert(?REFS, {Ref, {Owner, Stream, NInfo}}),
       {reply, {ok, StartTime}, State}
   end;
@@ -386,7 +384,7 @@ handle_cast({cancel_request, Ref}, State) ->
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
-      ok = finish_request(Info, State),
+      ok = finish_request(Info),
       {noreply, State#mstate{pids=Pids2}};
     [{Ref, {Owner, Stream, #request_info{pool=Pool}=Info}}] when is_pid(Stream) ->
       %% unlink the stream and untrack the owner
@@ -396,7 +394,7 @@ handle_cast({cancel_request, Ref}, State) ->
       %% notify the pool that the request have been canceled
       _ = PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, cancel}),
       %% update metrics
-      ok = finish_request(Info, State),
+      ok = finish_request(Info),
       %% terminate the async response
       _ = terminate_async_response(Stream),
       {noreply, State#mstate{pids=Pids2}}
@@ -485,7 +483,7 @@ handle_stream_exit(Pid, Ref, Reason, State) ->
       PoolHandler = hackney_app:get_app_env(pool_handler, hackney_pool),
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Owner, Reason}),
       %% update metrics
-      ok = finish_request(Info, State),
+      ok = finish_request(Info),
       %% reply
       {noreply, State#mstate{pids=Pids2}}
   end.
@@ -514,7 +512,7 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
-      ok = finish_request(Info, State),
+      ok = finish_request(Info),
       %% continue
       clean_requests(Rest, Pid, Reason, PoolHandler, State);
     [{Ref, {Pid, Stream, #request_info{pool=Pool}=Info}}] ->
@@ -530,7 +528,7 @@ clean_requests([Ref | Rest], Pid, Reason, PoolHandler, State) ->
       %% notify the pool that the request have been canceled
       PoolHandler:notify(Pool, {'DOWN', Ref, request, Pid, Reason}),
       %% update metrics
-      ok = finish_request(Info, State),
+      ok = finish_request(Info),
       %% continue
       clean_requests(Rest, Pid, Reason, PoolHandler, State#mstate{pids=Pids2})
   end;
@@ -601,27 +599,20 @@ untrack_owner(Pid, Ref, Pids) ->
 
 
 init_metrics() ->
-  %% get metrics module
-  Engine = metrics:init(hackney_util:mod_metrics()),
-
   %% initialise metrics
-  _ = metrics:new(Engine, counter, [hackney, nb_requests]),
-  _ = metrics:new(Engine, counter, [hackney, total_requests]),
-  _ = metrics:new(Engine, counter, [hackney, finished_requests]),
-  Engine.
+  metrics:new(counter, [hackney, nb_requests]),
+  metrics:new(counter, [hackney, total_requests]),
+  metrics:new(counter, [hackney, finished_requests]).
 
-start_request(#request_info{host=Host}, #mstate{metrics=Engine}) ->
-  _ = metrics:increment_counter(Engine, [hackney, Host, nb_requests]),
-  _ =  metrics:increment_counter(Engine, [hackney, nb_requests]),
-  _ = metrics:increment_counter(Engine, [hackney, total_requests]),
-  ok.
+start_request(#request_info{host=Host})->
+  metrics:update([hackney, Host, nb_requests]),
+  metrics:update([hackney, nb_requests]),
+  metrics:update([hackney, total_requests]).
 
 
-finish_request(#request_info{start_time=Begin, host=Host},
-               #mstate{metrics=Engine}) ->
+finish_request(#request_info{start_time=Begin, host=Host}) ->
   RequestTime = timer:now_diff(os:timestamp(), Begin)/1000,
-  _ = metrics:update_histogram(Engine, [hackney, Host, request_time], RequestTime),
-  _ = metrics:decrement_counter(Engine, [hackney, Host, nb_requests]),
-  _ = metrics:decrement_counter(Engine, [hackney, nb_requests]),
-  _ = metrics:increment_counter(Engine, [hackney, finished_requests]),
-  ok.
+  metrics:update([hackney, Host, request_time], RequestTime),
+  metrics:update([hackney, Host, nb_requests], {c, -1}),
+  metrics:update([hackney, nb_requests], {c, -1}),
+  metrics:update([hackney, finished_requests]).
